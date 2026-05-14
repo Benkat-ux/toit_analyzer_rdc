@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+*.pyo
+*.zip
+
+data/*.gpkg
+data/*.gpkg-shm
+data/*.gpkg-wal
+data/open_buildings_cache/
+*.download
