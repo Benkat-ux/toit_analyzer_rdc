@@ -9,6 +9,7 @@ import csv
 import gzip
 import io
 import json
+import math
 import os
 import re
 import urllib.request
@@ -91,6 +92,7 @@ class ToitAnalyzerRDC:
         self.open_buildings_task = None
         self.open_buildings_download_task = None
         self.pending_open_buildings_zone_wkt = None
+        self.pending_auto_zone_params = None
         self.auto_count_after_load = False
 
     def tr(self, message):
@@ -158,6 +160,8 @@ class ToitAnalyzerRDC:
         self.dlg.btn_pointer_coordonnees.clicked.connect(self.pointer_coordonnees)
         self.dlg.btn_pick_point.clicked.connect(self.activer_selection_point)
         self.dlg.btn_creer_zone.clicked.connect(self.creer_zone)
+        if hasattr(self.dlg, "btn_detecter_zone"):
+            self.dlg.btn_detecter_zone.clicked.connect(self.detecter_zone_autour_point)
         self.dlg.btn_analyser.clicked.connect(self.analyser_zone)
         self.dlg.btn_editer.clicked.connect(self.activer_edition_toits)
         self.dlg.btn_stop_editer.clicked.connect(self.arreter_edition_toits)
@@ -185,11 +189,13 @@ class ToitAnalyzerRDC:
             self.dlg.btn_pick_point,
             self.dlg.btn_pointer_coordonnees,
             self.dlg.btn_creer_zone,
+            getattr(self.dlg, "btn_detecter_zone", None),
             self.dlg.btn_analyser,
             self.dlg.btn_export_gpkg,
             self.dlg.btn_export_csv,
         ):
-            button.setEnabled(enabled)
+            if button is not None:
+                button.setEnabled(enabled)
 
     # ------------------------------------------------------------------
     # Donnees et geometries
@@ -469,6 +475,342 @@ class ToitAnalyzerRDC:
         )
         layer.updateFields()
         return layer
+
+    def detecter_zone_autour_point(self):
+        values = self._get_inputs()
+        if values is None:
+            return
+
+        lat, lon = values
+        search_radius = float(self.dlg.input_rayon_detection.value())
+        connect_distance = float(self.dlg.input_distance_detection.value())
+        margin = float(self.dlg.input_marge_detection.value())
+        min_confidence = 0.65
+        if hasattr(self.dlg, "input_confidence"):
+            min_confidence = float(self.dlg.input_confidence.value())
+
+        search_geom = self._circle_geometry_wgs84(lat, lon, search_radius)
+        local_gpkg = self._local_open_buildings_gpkg()
+        self._set_buttons_enabled(False)
+        self._set_progress(0, 100)
+        self._set_result("Detection automatique de la zone habitee...")
+        QCoreApplication.processEvents()
+
+        if os.path.exists(local_gpkg):
+            try:
+                rows = self._open_buildings_rows_from_local(
+                    search_geom, min_confidence
+                )
+                self._finish_auto_zone_detection(
+                    rows, lat, lon, search_radius, connect_distance, margin
+                )
+            except Exception as exc:
+                self._set_buttons_enabled(True)
+                QMessageBox.critical(
+                    self.iface.mainWindow(),
+                    "Detection impossible",
+                    "Impossible de detecter la zone automatiquement.\n\nDetail: {}".format(
+                        exc
+                    ),
+                )
+            return
+
+        try:
+            tiles = self._open_buildings_tiles_for_zone(search_geom)
+            if not tiles:
+                raise RuntimeError("Aucune tuile Open Buildings ne couvre ce point.")
+            bbox = search_geom.boundingBox()
+            self.pending_auto_zone_params = (
+                lat,
+                lon,
+                search_radius,
+                connect_distance,
+                margin,
+            )
+            self.open_buildings_task = QgsTask.fromFunction(
+                "Detection zone habitee",
+                self._open_buildings_task,
+                tiles=tiles,
+                zone_wkt=search_geom.asWkt(),
+                zone_bbox=(
+                    bbox.xMinimum(),
+                    bbox.yMinimum(),
+                    bbox.xMaximum(),
+                    bbox.yMaximum(),
+                ),
+                min_confidence=min_confidence,
+                on_finished=self._auto_zone_detection_finished,
+            )
+            self.open_buildings_task.progressChanged.connect(
+                lambda progress: self._set_progress(int(progress), 100)
+            )
+            QgsApplication.taskManager().addTask(self.open_buildings_task)
+        except Exception as exc:
+            self._set_buttons_enabled(True)
+            QMessageBox.critical(
+                self.iface.mainWindow(),
+                "Detection impossible",
+                "Impossible de charger les batiments autour du point.\n\nDetail: {}".format(
+                    exc
+                ),
+            )
+
+    def _circle_geometry_wgs84(self, lat, lon, radius_m):
+        wgs84 = QgsCoordinateReferenceSystem("EPSG:4326")
+        metric = self._metric_crs_for_point(lat, lon)
+        to_metric = QgsCoordinateTransform(
+            wgs84, metric, QgsProject.instance().transformContext()
+        )
+        to_wgs84 = QgsCoordinateTransform(
+            metric, wgs84, QgsProject.instance().transformContext()
+        )
+        center_metric = to_metric.transform(QgsPointXY(lon, lat))
+        geom = QgsGeometry.fromPointXY(center_metric).buffer(radius_m, 48)
+        geom.transform(to_wgs84)
+        return geom
+
+    def _open_buildings_rows_from_local(self, zone_geom, min_confidence):
+        local_gpkg = self._local_open_buildings_gpkg()
+        uri = "{}|layername={}".format(local_gpkg, LOCAL_OPEN_BUILDINGS_LAYER)
+        source = QgsVectorLayer(uri, "Open Buildings RDC", "ogr")
+        if not source.isValid():
+            raise RuntimeError("Base locale invalide: {}".format(local_gpkg))
+
+        rows = []
+        request = QgsFeatureRequest().setFilterRect(zone_geom.boundingBox())
+        for feature in source.getFeatures(request):
+            geom = feature.geometry()
+            if geom is None or geom.isEmpty() or not zone_geom.contains(geom):
+                continue
+
+            names = feature.fields().names()
+
+            def attr(name, default=""):
+                if name not in names:
+                    return default
+                value = feature[name]
+                return default if value is None else value
+
+            try:
+                confidence = float(attr("confidence", 0))
+            except Exception:
+                confidence = 0.0
+            if confidence < min_confidence:
+                continue
+
+            try:
+                point = geom.asPoint()
+            except Exception:
+                continue
+
+            try:
+                area_src = float(attr("area_m2", attr("area_m2_src", 0)))
+            except Exception:
+                area_src = 0.0
+
+            rows.append(
+                {
+                    "openb_id": str(attr("openb_id", feature.id())),
+                    "confidence": confidence,
+                    "area_m2_src": area_src,
+                    "plus_code": str(attr("plus_code", "")),
+                    "latitude": point.y(),
+                    "longitude": point.x(),
+                }
+            )
+        return rows
+
+    def _auto_zone_detection_finished(self, exception, result=None):
+        self._set_buttons_enabled(True)
+        if exception is not None:
+            QMessageBox.critical(
+                self.iface.mainWindow(),
+                "Detection impossible",
+                "Impossible de detecter la zone automatiquement.\n\nDetail: {}".format(
+                    exception
+                ),
+            )
+            self._set_result("Detection automatique interrompue.")
+            return
+
+        if result is None:
+            self._set_result("Detection automatique interrompue.")
+            return
+
+        params = self.pending_auto_zone_params
+        self.pending_auto_zone_params = None
+        if params is None:
+            self._set_result("Parametres de detection introuvables.")
+            return
+
+        self._finish_auto_zone_detection(result, *params)
+
+    def _finish_auto_zone_detection(
+        self, rows, lat, lon, search_radius, connect_distance, margin
+    ):
+        try:
+            cluster_rows, zone_geom = self._auto_zone_from_buildings(
+                rows, lat, lon, connect_distance, margin
+            )
+        except Exception as exc:
+            self._set_buttons_enabled(True)
+            QMessageBox.warning(
+                self.iface.mainWindow(),
+                "Zone non detectee",
+                "La zone automatique n'a pas pu etre construite.\n\nDetail: {}".format(
+                    exc
+                ),
+            )
+            self._set_result("Aucune zone habitee detectee autour du point.")
+            return
+
+        layer = self._create_zone_layer()
+        surface_ha = self._distance_area().measureArea(zone_geom) / 10000.0
+        feature = QgsFeature(layer.fields())
+        feature.setGeometry(zone_geom)
+        feature.setAttributes(
+            [
+                "Zone detectee",
+                lat,
+                lon,
+                surface_ha,
+                "detection_auto_open_buildings",
+            ]
+        )
+        layer.dataProvider().addFeature(feature)
+        layer.updateExtents()
+        QgsProject.instance().addMapLayer(layer)
+        self.zone_layer = layer
+        self._style_zone(layer)
+
+        buildings_layer = self._create_open_buildings_layer(cluster_rows)
+        QgsProject.instance().addMapLayer(buildings_layer)
+        self.buildings_layer = buildings_layer
+        self._style_buildings(buildings_layer)
+        self._zoom_to_layer(layer)
+        self.iface.setActiveLayer(layer)
+        layer.startEditing()
+        self._set_buttons_enabled(True)
+        self._set_progress(100, 100)
+        self._set_result(
+            "Zone habitee detectee automatiquement.\n"
+            "Rayon recherche: {:,.0f} m\n"
+            "Distance entre toits: {:,.0f} m\n"
+            "Batiments du groupe: {:,}\n"
+            "Surface zone: {:.2f} ha\n\n"
+            "Le polygone reste modifiable manuellement avant le comptage.".format(
+                search_radius, connect_distance, len(cluster_rows), surface_ha
+            )
+        )
+
+    def _auto_zone_from_buildings(self, rows, lat, lon, connect_distance, margin):
+        if not rows:
+            raise RuntimeError("Aucun batiment trouve dans le rayon de recherche.")
+
+        wgs84 = QgsCoordinateReferenceSystem("EPSG:4326")
+        metric = self._metric_crs_for_point(lat, lon)
+        to_metric = QgsCoordinateTransform(
+            wgs84, metric, QgsProject.instance().transformContext()
+        )
+        to_wgs84 = QgsCoordinateTransform(
+            metric, wgs84, QgsProject.instance().transformContext()
+        )
+        center = to_metric.transform(QgsPointXY(lon, lat))
+        points = []
+        for index, row in enumerate(rows):
+            try:
+                point = to_metric.transform(
+                    QgsPointXY(float(row["longitude"]), float(row["latitude"]))
+                )
+            except Exception:
+                continue
+            dx = point.x() - center.x()
+            dy = point.y() - center.y()
+            points.append(
+                {
+                    "index": index,
+                    "row": row,
+                    "point": point,
+                    "distance2_center": dx * dx + dy * dy,
+                }
+            )
+
+        if not points:
+            raise RuntimeError("Aucun batiment exploitable autour du point.")
+
+        seed = min(points, key=lambda item: item["distance2_center"])
+        cluster_indices = self._connected_building_indices(
+            points, seed["index"], connect_distance
+        )
+        cluster_points = [
+            item["point"] for item in points if item["index"] in cluster_indices
+        ]
+        cluster_rows = [
+            item["row"] for item in points if item["index"] in cluster_indices
+        ]
+        if len(cluster_points) < 3:
+            raise RuntimeError(
+                "Moins de 3 batiments connectes au point central avec ces parametres."
+            )
+
+        zone_metric = self._zone_geometry_from_metric_points(cluster_points, margin)
+        zone_wgs84 = QgsGeometry(zone_metric)
+        zone_wgs84.transform(to_wgs84)
+        return cluster_rows, zone_wgs84
+
+    def _connected_building_indices(self, points, seed_index, connect_distance):
+        cell_size = max(connect_distance, 1.0)
+        max_distance2 = connect_distance * connect_distance
+        grid = {}
+        by_index = {}
+        for item in points:
+            point = item["point"]
+            cell = (
+                int(math.floor(point.x() / cell_size)),
+                int(math.floor(point.y() / cell_size)),
+            )
+            item["cell"] = cell
+            by_index[item["index"]] = item
+            grid.setdefault(cell, []).append(item)
+
+        visited = set()
+        queue = [seed_index]
+        while queue:
+            current_index = queue.pop(0)
+            if current_index in visited:
+                continue
+            visited.add(current_index)
+            current = by_index[current_index]
+            cx, cy = current["cell"]
+            current_point = current["point"]
+            for nx in range(cx - 1, cx + 2):
+                for ny in range(cy - 1, cy + 2):
+                    for neighbor in grid.get((nx, ny), []):
+                        neighbor_index = neighbor["index"]
+                        if neighbor_index in visited:
+                            continue
+                        neighbor_point = neighbor["point"]
+                        dx = neighbor_point.x() - current_point.x()
+                        dy = neighbor_point.y() - current_point.y()
+                        if dx * dx + dy * dy <= max_distance2:
+                            queue.append(neighbor_index)
+        return visited
+
+    def _zone_geometry_from_metric_points(self, points, margin):
+        margin = max(float(margin), 1.0)
+        if len(points) > 5000:
+            geom = QgsGeometry.fromMultiPointXY(points).convexHull().buffer(margin, 12)
+            if geom is None or geom.isEmpty():
+                raise RuntimeError("Enveloppe automatique vide.")
+            return geom
+
+        buffers = [QgsGeometry.fromPointXY(point).buffer(margin, 8) for point in points]
+        geom = QgsGeometry.unaryUnion(buffers)
+        if geom is None or geom.isEmpty():
+            raise RuntimeError("Enveloppe automatique vide.")
+        if geom.isMultipart():
+            geom = QgsGeometry.fromMultiPointXY(points).convexHull().buffer(margin, 12)
+        return geom
 
     # ------------------------------------------------------------------
     # Chargement Open Buildings
