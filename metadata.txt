@@ -6,7 +6,7 @@
 name=Toit Analyzer RDC
 qgisMinimumVersion=3.0
 description=Roof counting and rural electrification planning tools for DR Congo.
-version=0.4
+version=0.6
 author=Benjamin Katende
 email=benjamin.katende@anser.gouv.cd
 
@@ -21,7 +21,7 @@ license=GPL-2.0-or-later
 
 hasProcessingProvider=no
 # Uncomment the following line and add your changelog:
-changelog=0.4: Add automatic inhabited-zone detection from a center coordinate while keeping manual polygon drawing. 0.3: Prepare public release packaging; store the large RDC Open Buildings database outside the plugin zip; add optional authorized download flow.
+changelog=0.6: Add administrative-boundary analysis from GeoJSON polygons with roof counts and CSV export. 0.5: Add batch import from Excel/CSV for multiple named zones and automatic processing using the local RDC Open Buildings database. 0.4: Add automatic inhabited-zone detection from a center coordinate while keeping manual polygon drawing. 0.3: Prepare public release packaging; store the large RDC Open Buildings database outside the plugin zip; add optional authorized download flow.
 
 # Tags are comma separated with spaces allowed
 tags=RDC, toits, batiments, OSM, electrification, planification energetique

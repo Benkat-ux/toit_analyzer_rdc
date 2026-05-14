@@ -13,6 +13,8 @@ EXCLUDED_DIRS = {
     ".git",
     "__pycache__",
     "data",
+    "cod_admin_boundaries.geojson (1)",
+    "dist",
 }
 EXCLUDED_SUFFIXES = (
     ".pyc",

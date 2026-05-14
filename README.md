@@ -6,6 +6,8 @@ Toit Analyzer RDC is a QGIS plugin for roof counting and rural electrification p
 
 - Draw or select an analysis zone in QGIS.
 - Automatically detect an inhabited-zone polygon around a center coordinate.
+- Import multiple named zones from Excel or CSV and run automatic analysis in batch.
+- Load administrative boundary GeoJSON files and count roofs per polygon.
 - Load Google Open Buildings roof points for the selected zone.
 - Use a local national Open Buildings GeoPackage when available.
 - Count buildings inside the zone and estimate households and population.
@@ -13,6 +15,10 @@ Toit Analyzer RDC is a QGIS plugin for roof counting and rural electrification p
 - Export analysis layers to GeoPackage and statistics to CSV.
 
 The manual drawing workflow remains available. Automatic detection creates an editable polygon proposal from nearby building density, so users can adjust the boundary before counting.
+
+Batch files should include columns equivalent to `nom_zone`, `latitude`, and `longitude`. The batch workflow uses the local RDC Open Buildings GeoPackage so large lists of points can be processed without repeatedly downloading online tiles.
+
+Administrative boundary analysis works with polygon GeoJSON files such as COD admin1, admin2, or admin3 boundaries. It uses the local RDC Open Buildings GeoPackage and creates a result layer with roof counts, density, household estimates, and population estimates for each polygon.
 
 ## Open Buildings RDC data
 

@@ -7,4 +7,5 @@ data/*.gpkg
 data/*.gpkg-shm
 data/*.gpkg-wal
 data/open_buildings_cache/
+cod_admin_boundaries.geojson (1)/
 *.download

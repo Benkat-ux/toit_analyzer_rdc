@@ -612,6 +612,325 @@ QProgressBar {
        </item>
       </layout>
      </widget>
+     <widget class="QWidget" name="tab_batch">
+      <attribute name="title">
+       <string>Batch</string>
+      </attribute>
+      <layout class="QVBoxLayout" name="layout_tab_batch">
+       <property name="spacing">
+        <number>12</number>
+       </property>
+       <property name="leftMargin">
+        <number>14</number>
+       </property>
+       <property name="topMargin">
+        <number>14</number>
+       </property>
+       <property name="rightMargin">
+        <number>14</number>
+       </property>
+       <property name="bottomMargin">
+        <number>14</number>
+       </property>
+       <item>
+        <widget class="QGroupBox" name="group_batch_import">
+         <property name="title">
+          <string>Import des zones</string>
+         </property>
+         <layout class="QGridLayout" name="gridLayout_batch_import">
+          <property name="leftMargin">
+           <number>14</number>
+          </property>
+          <property name="topMargin">
+           <number>14</number>
+          </property>
+          <property name="rightMargin">
+           <number>14</number>
+          </property>
+          <property name="bottomMargin">
+           <number>14</number>
+          </property>
+          <property name="horizontalSpacing">
+           <number>14</number>
+          </property>
+          <property name="verticalSpacing">
+           <number>10</number>
+          </property>
+          <item row="0" column="0">
+           <widget class="QPushButton" name="btn_import_batch">
+            <property name="text">
+             <string>Importer Excel ou CSV</string>
+            </property>
+           </widget>
+          </item>
+          <item row="0" column="1">
+           <widget class="QLabel" name="label_batch_file">
+            <property name="text">
+             <string>Aucun fichier importe</string>
+            </property>
+           </widget>
+          </item>
+          <item row="1" column="0" colspan="2">
+           <widget class="QLabel" name="label_batch_count">
+            <property name="text">
+             <string>Colonnes attendues: nom_zone, latitude, longitude</string>
+            </property>
+           </widget>
+          </item>
+         </layout>
+        </widget>
+       </item>
+       <item>
+        <widget class="QGroupBox" name="group_batch_traitement">
+         <property name="title">
+          <string>Traitement automatique</string>
+         </property>
+         <layout class="QVBoxLayout" name="verticalLayout_batch_traitement">
+          <property name="leftMargin">
+           <number>14</number>
+          </property>
+          <property name="topMargin">
+           <number>14</number>
+          </property>
+          <property name="rightMargin">
+           <number>14</number>
+          </property>
+          <property name="bottomMargin">
+           <number>14</number>
+          </property>
+          <property name="spacing">
+           <number>10</number>
+          </property>
+          <item>
+           <widget class="QPushButton" name="btn_lancer_batch">
+            <property name="text">
+             <string>Lancer l'analyse par lots</string>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QPushButton" name="btn_export_batch_csv">
+            <property name="text">
+             <string>Exporter les resultats batch en CSV</string>
+            </property>
+           </widget>
+          </item>
+         </layout>
+        </widget>
+       </item>
+       <item>
+        <widget class="QGroupBox" name="group_batch_journal">
+         <property name="title">
+          <string>Journal batch</string>
+         </property>
+         <layout class="QVBoxLayout" name="verticalLayout_batch_journal">
+          <property name="leftMargin">
+           <number>14</number>
+          </property>
+          <property name="topMargin">
+           <number>14</number>
+          </property>
+          <property name="rightMargin">
+           <number>14</number>
+          </property>
+          <property name="bottomMargin">
+           <number>14</number>
+          </property>
+          <item>
+           <widget class="QPlainTextEdit" name="label_batch_resultat">
+            <property name="readOnly">
+             <bool>true</bool>
+            </property>
+            <property name="minimumSize">
+             <size>
+              <width>0</width>
+              <height>160</height>
+             </size>
+            </property>
+            <property name="plainText">
+             <string>Aucun traitement batch lance.</string>
+            </property>
+           </widget>
+          </item>
+         </layout>
+        </widget>
+       </item>
+      </layout>
+     </widget>
+     <widget class="QWidget" name="tab_admin">
+      <attribute name="title">
+       <string>Admin</string>
+      </attribute>
+      <layout class="QVBoxLayout" name="layout_tab_admin">
+       <property name="spacing">
+        <number>12</number>
+       </property>
+       <property name="leftMargin">
+        <number>14</number>
+       </property>
+       <property name="topMargin">
+        <number>14</number>
+       </property>
+       <property name="rightMargin">
+        <number>14</number>
+       </property>
+       <property name="bottomMargin">
+        <number>14</number>
+       </property>
+       <item>
+        <widget class="QGroupBox" name="group_admin_source">
+         <property name="title">
+          <string>Limites administratives</string>
+         </property>
+         <layout class="QGridLayout" name="gridLayout_admin_source">
+          <property name="leftMargin">
+           <number>14</number>
+          </property>
+          <property name="topMargin">
+           <number>14</number>
+          </property>
+          <property name="rightMargin">
+           <number>14</number>
+          </property>
+          <property name="bottomMargin">
+           <number>14</number>
+          </property>
+          <property name="horizontalSpacing">
+           <number>14</number>
+          </property>
+          <property name="verticalSpacing">
+           <number>10</number>
+          </property>
+          <item row="0" column="0">
+           <widget class="QPushButton" name="btn_charger_admin">
+            <property name="text">
+             <string>Charger un GeoJSON admin</string>
+            </property>
+           </widget>
+          </item>
+          <item row="0" column="1">
+           <widget class="QLabel" name="label_admin_file">
+            <property name="text">
+             <string>Aucun fichier charge</string>
+            </property>
+           </widget>
+          </item>
+          <item row="1" column="0" colspan="2">
+           <widget class="QLabel" name="label_admin_count">
+            <property name="text">
+             <string>Chargez admin1, admin2 ou admin3 puis lancez l'analyse.</string>
+            </property>
+           </widget>
+          </item>
+         </layout>
+        </widget>
+       </item>
+       <item>
+        <widget class="QGroupBox" name="group_admin_analyse">
+         <property name="title">
+          <string>Analyse des polygones</string>
+         </property>
+         <layout class="QVBoxLayout" name="verticalLayout_admin_analyse">
+          <property name="leftMargin">
+           <number>14</number>
+          </property>
+          <property name="topMargin">
+           <number>14</number>
+          </property>
+          <property name="rightMargin">
+           <number>14</number>
+          </property>
+          <property name="bottomMargin">
+           <number>14</number>
+          </property>
+          <property name="spacing">
+           <number>10</number>
+          </property>
+          <item>
+           <widget class="QPushButton" name="btn_analyser_admin_selection">
+            <property name="text">
+             <string>Analyser les polygones selectionnes</string>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QPushButton" name="btn_analyser_admin_tous">
+            <property name="text">
+             <string>Analyser tous les polygones charges</string>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QPushButton" name="btn_export_admin_xlsx">
+            <property name="text">
+             <string>Exporter le tableau admin en Excel</string>
+            </property>
+           </widget>
+          </item>
+         </layout>
+        </widget>
+       </item>
+       <item>
+        <widget class="QGroupBox" name="group_admin_journal">
+         <property name="title">
+          <string>Journal admin</string>
+         </property>
+         <layout class="QVBoxLayout" name="verticalLayout_admin_journal">
+          <property name="leftMargin">
+           <number>14</number>
+          </property>
+          <property name="topMargin">
+           <number>14</number>
+          </property>
+          <property name="rightMargin">
+           <number>14</number>
+          </property>
+          <property name="bottomMargin">
+           <number>14</number>
+          </property>
+          <item>
+           <widget class="QPlainTextEdit" name="label_admin_resultat">
+            <property name="readOnly">
+             <bool>true</bool>
+            </property>
+            <property name="minimumSize">
+             <size>
+              <width>0</width>
+              <height>160</height>
+             </size>
+            </property>
+            <property name="plainText">
+             <string>Aucune analyse administrative lancee.</string>
+            </property>
+           </widget>
+          </item>
+         </layout>
+        </widget>
+       </item>
+      </layout>
+     </widget>
+     <widget class="QWidget" name="tab_demande">
+      <attribute name="title">
+       <string>Demande</string>
+      </attribute>
+      <layout class="QVBoxLayout" name="layout_tab_demande">
+       <property name="spacing">
+        <number>12</number>
+       </property>
+       <property name="leftMargin">
+        <number>14</number>
+       </property>
+       <property name="topMargin">
+        <number>14</number>
+       </property>
+       <property name="rightMargin">
+        <number>14</number>
+       </property>
+       <property name="bottomMargin">
+        <number>14</number>
+       </property>
+      </layout>
+     </widget>
      <widget class="QWidget" name="tab_resultats">
       <attribute name="title">
        <string>Resultats</string>
