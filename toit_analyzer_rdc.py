@@ -111,6 +111,7 @@ class ToitAnalyzerRDC:
         self.admin_results_layer = None
         self.admin_buildings_layer = None
         self.admin_results = []
+        self.demand_results = []
         self.auto_count_after_load = False
 
     def tr(self, message):
@@ -201,6 +202,10 @@ class ToitAnalyzerRDC:
             self.dlg.btn_analyser_admin_tous.clicked.connect(self.analyser_admin_tous)
         if hasattr(self.dlg, "btn_export_admin_xlsx"):
             self.dlg.btn_export_admin_xlsx.clicked.connect(self.exporter_admin_xlsx)
+        if hasattr(self.dlg, "btn_estimer_demande"):
+            self.dlg.btn_estimer_demande.clicked.connect(self.estimer_demande)
+        if hasattr(self.dlg, "btn_export_demande_xlsx"):
+            self.dlg.btn_export_demande_xlsx.clicked.connect(self.exporter_demande_xlsx)
 
     def _set_default_values(self):
         self.dlg.input_latitude.setText("-4.325")
@@ -218,6 +223,10 @@ class ToitAnalyzerRDC:
     def _set_admin_result(self, text):
         if self.dlg is not None and hasattr(self.dlg, "label_admin_resultat"):
             self.dlg.label_admin_resultat.setPlainText(text)
+
+    def _set_demand_result(self, text):
+        if self.dlg is not None and hasattr(self.dlg, "label_demande_resultat"):
+            self.dlg.label_demande_resultat.setPlainText(text)
 
     def _set_progress(self, value, maximum=100):
         if self.dlg is None or not hasattr(self.dlg, "progress_chargement"):
@@ -242,6 +251,8 @@ class ToitAnalyzerRDC:
             getattr(self.dlg, "btn_analyser_admin_selection", None),
             getattr(self.dlg, "btn_analyser_admin_tous", None),
             getattr(self.dlg, "btn_export_admin_xlsx", None),
+            getattr(self.dlg, "btn_estimer_demande", None),
+            getattr(self.dlg, "btn_export_demande_xlsx", None),
         ):
             if button is not None:
                 button.setEnabled(enabled)
@@ -1708,6 +1719,7 @@ class ToitAnalyzerRDC:
         name_idx = self._find_column(headers, ("nom_zone", "nom", "zone", "village", "localite", "name"))
         lat_idx = self._find_column(headers, ("latitude", "lat", "y"))
         lon_idx = self._find_column(headers, ("longitude", "lon", "long", "lng", "x"))
+        province_idx = self._find_column(headers, ("province", "adm1", "adm1_name"))
 
         data_rows = table[1:]
         first_data_line = 2
@@ -1730,6 +1742,9 @@ class ToitAnalyzerRDC:
                 name = str(row[name_idx]).strip()
             if not name:
                 name = "Zone {}".format(len(batch_rows) + 1)
+            province = ""
+            if province_idx is not None and province_idx < len(row):
+                province = str(row[province_idx]).strip()
             try:
                 lat = self._parse_coordinate(str(row[lat_idx]), "latitude")
                 lon = self._parse_coordinate(str(row[lon_idx]), "longitude")
@@ -1740,6 +1755,7 @@ class ToitAnalyzerRDC:
             batch_rows.append(
                 {
                     "nom_zone": name,
+                    "province": province,
                     "latitude": lat,
                     "longitude": lon,
                     "ligne": row_index,
@@ -1895,6 +1911,7 @@ class ToitAnalyzerRDC:
         )
         result = {
             "nom_zone": row["nom_zone"],
+            "province": row.get("province", ""),
             "latitude": row["latitude"],
             "longitude": row["longitude"],
             "ligne": row["ligne"],
@@ -1974,6 +1991,7 @@ class ToitAnalyzerRDC:
     def _batch_error_result(self, row, message):
         return {
             "nom_zone": row["nom_zone"],
+            "province": row.get("province", ""),
             "latitude": row["latitude"],
             "longitude": row["longitude"],
             "ligne": row["ligne"],
@@ -2503,6 +2521,232 @@ class ToitAnalyzerRDC:
         self._write_simple_xlsx(path, "Resultats admin", rows)
         self._set_admin_result("Export Excel admin termine:\n{}".format(path))
 
+    # ------------------------------------------------------------------
+    # Estimation de la demande
+    # ------------------------------------------------------------------
+
+    def estimer_demande(self):
+        try:
+            source_rows = self._demand_source_rows()
+            assumptions = self._demand_assumptions()
+        except Exception as exc:
+            QMessageBox.warning(
+                self.iface.mainWindow(),
+                "Demande impossible",
+                str(exc),
+            )
+            return
+
+        if not source_rows:
+            QMessageBox.warning(
+                self.iface.mainWindow(),
+                "Aucune source",
+                "Aucun resultat disponible pour estimer la demande.",
+            )
+            return
+
+        self.demand_results = []
+        growth_factor = (1.0 + assumptions["croissance"] / 100.0) ** assumptions["horizon"]
+        weighted_kwh_per_household = (
+            assumptions["part_faible"] / 100.0 * assumptions["conso_faible"]
+            + assumptions["part_moyen"] / 100.0 * assumptions["conso_moyen"]
+            + assumptions["part_eleve"] / 100.0 * assumptions["conso_eleve"]
+        )
+
+        for row in source_rows:
+            households = float(row.get("menages", 0.0) or 0.0)
+            connected_households = households * assumptions["taux_raccordement"] / 100.0
+            residential_kwh_day = connected_households * weighted_kwh_per_household
+            productive_kwh_day = residential_kwh_day * assumptions["marge_productive"] / 100.0
+            total_kwh_day = residential_kwh_day + productive_kwh_day
+            total_mwh_year = total_kwh_day * 365.0 / 1000.0
+            peak_residential_kw = residential_kwh_day / 24.0 / assumptions["fc_residentiel"]
+            peak_productive_kw = productive_kwh_day / 24.0 / assumptions["fc_productif"]
+            peak_total_kw = peak_residential_kw + peak_productive_kw
+
+            self.demand_results.append(
+                {
+                    "province": row.get("province", ""),
+                    "entite": row.get("entite", "Sans nom"),
+                    "toits": int(row.get("toits", 0) or 0),
+                    "menages": households,
+                    "population": float(row.get("population", 0.0) or 0.0),
+                    "menages_raccordes": connected_households,
+                    "res_kwh_jour": residential_kwh_day,
+                    "prod_kwh_jour": productive_kwh_day,
+                    "total_kwh_jour": total_kwh_day,
+                    "total_mwh_an": total_mwh_year,
+                    "pointe_res_kw": peak_residential_kw,
+                    "pointe_prod_kw": peak_productive_kw,
+                    "pointe_totale_kw": peak_total_kw,
+                    "total_mwh_an_projete": total_mwh_year * growth_factor,
+                    "pointe_proj_kw": peak_total_kw * growth_factor,
+                }
+            )
+
+        summary = self._format_demand_summary()
+        self._set_demand_result(summary)
+        self._set_result(summary)
+
+    def _demand_source_rows(self):
+        source = "Resultats admin"
+        if hasattr(self.dlg, "combo_demande_source"):
+            source = self.dlg.combo_demande_source.currentText()
+
+        if source == "Resultats admin":
+            return [
+                {
+                    "province": result.get("adm1_name", ""),
+                    "entite": result.get("name", "") or result.get("pcode", "") or "Sans nom",
+                    "toits": result.get("nb_toits", 0),
+                    "menages": result.get("menages_estimes", 0.0),
+                    "population": result.get("population_estimee", 0.0),
+                }
+                for result in self.admin_results
+                if result.get("statut", "OK") == "OK"
+            ]
+
+        if source == "Resultats batch":
+            return [
+                {
+                    "province": result.get("province", ""),
+                    "entite": result.get("nom_zone", "") or "Sans nom",
+                    "toits": result.get("nb_toits", 0),
+                    "menages": result.get("menages_estimes", 0.0),
+                    "population": result.get("population_estimee", 0.0),
+                }
+                for result in self.batch_results
+                if result.get("statut", "OK") == "OK"
+            ]
+
+        if self.last_stats:
+            return [
+                {
+                    "province": "",
+                    "entite": "Zone analysee",
+                    "toits": self.last_stats.get("nb_toits", 0),
+                    "menages": self.last_stats.get("menages_estimes", 0.0),
+                    "population": self.last_stats.get("population_estimee", 0.0),
+                }
+            ]
+        return []
+
+    def _demand_assumptions(self):
+        assumptions = {
+            "taux_raccordement": float(self.dlg.input_taux_raccordement.value()),
+            "part_faible": float(self.dlg.input_part_faible.value()),
+            "conso_faible": float(self.dlg.input_conso_faible.value()),
+            "part_moyen": float(self.dlg.input_part_moyen.value()),
+            "conso_moyen": float(self.dlg.input_conso_moyen.value()),
+            "part_eleve": float(self.dlg.input_part_eleve.value()),
+            "conso_eleve": float(self.dlg.input_conso_eleve.value()),
+            "marge_productive": float(self.dlg.input_marge_productive.value()),
+            "fc_residentiel": float(self.dlg.input_fc_residentiel.value()),
+            "fc_productif": float(self.dlg.input_fc_productif.value()),
+            "croissance": float(self.dlg.input_croissance_demande.value()),
+            "horizon": int(self.dlg.input_horizon_demande.value()),
+        }
+        total_parts = (
+            assumptions["part_faible"]
+            + assumptions["part_moyen"]
+            + assumptions["part_eleve"]
+        )
+        if abs(total_parts - 100.0) > 0.01:
+            raise RuntimeError(
+                "La somme des parts faible, moyen et eleve doit etre egale a 100%.\n"
+                "Somme actuelle: {:.1f}%".format(total_parts)
+            )
+        return assumptions
+
+    def _format_demand_summary(self):
+        lines = [
+            "Estimation de la demande terminee.",
+            "Entites traitees: {}".format(len(self.demand_results)),
+            "",
+            "{:<24} {:>12} {:>14} {:>14} {:>12}".format(
+                "Entite", "Raccordes", "Total kWh/j", "Total MWh/an", "Pointe kW"
+            ),
+            "{:<24} {:>12} {:>14} {:>14} {:>12}".format(
+                "-" * 24, "-" * 12, "-" * 14, "-" * 14, "-" * 12
+            ),
+        ]
+        for result in self.demand_results[:30]:
+            lines.append(
+                "{:<24} {:>12,.0f} {:>14,.0f} {:>14,.0f} {:>12,.0f}".format(
+                    result["entite"][:24],
+                    result["menages_raccordes"],
+                    result["total_kwh_jour"],
+                    result["total_mwh_an"],
+                    result["pointe_totale_kw"],
+                )
+            )
+        if len(self.demand_results) > 30:
+            lines.append("... {} lignes supplementaires".format(len(self.demand_results) - 30))
+        return "\n".join(lines)
+
+    def exporter_demande_xlsx(self):
+        if not self.demand_results:
+            QMessageBox.warning(
+                self.iface.mainWindow(),
+                "Resultats absents",
+                "Estimez d'abord la demande.",
+            )
+            return
+
+        path, _ = QFileDialog.getSaveFileName(
+            self.iface.mainWindow(),
+            "Exporter la demande en Excel",
+            os.path.expanduser("~/toit_analyzer_rdc_demande.xlsx"),
+            "Excel (*.xlsx)",
+        )
+        if not path:
+            return
+        if not path.lower().endswith(".xlsx"):
+            path += ".xlsx"
+
+        rows = [
+            [
+                "Province",
+                "Entite",
+                "Toits",
+                "Menages",
+                "Population",
+                "Menages raccordes",
+                "Residentiel kWh/j",
+                "Productif kWh/j",
+                "Total kWh/j",
+                "Total MWh/an",
+                "Pointe res. kW",
+                "Pointe prod. kW",
+                "Pointe totale kW",
+                "Total MWh/an projete",
+                "Pointe projetee kW",
+            ]
+        ]
+        for result in self.demand_results:
+            rows.append(
+                [
+                    result.get("province", ""),
+                    result["entite"],
+                    int(result["toits"]),
+                    int(round(result["menages"])),
+                    int(round(result["population"])),
+                    int(round(result["menages_raccordes"])),
+                    round(result["res_kwh_jour"], 2),
+                    round(result["prod_kwh_jour"], 2),
+                    round(result["total_kwh_jour"], 2),
+                    round(result["total_mwh_an"], 2),
+                    round(result["pointe_res_kw"], 2),
+                    round(result["pointe_prod_kw"], 2),
+                    round(result["pointe_totale_kw"], 2),
+                    round(result["total_mwh_an_projete"], 2),
+                    round(result["pointe_proj_kw"], 2),
+                ]
+            )
+
+        self._write_simple_xlsx(path, "Demande", rows)
+        self._set_demand_result("Export Excel demande termine:\n{}".format(path))
+
     def _write_simple_xlsx(self, path, sheet_name, rows):
         sheet_name = sheet_name[:31] or "Feuille1"
         with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as archive:
@@ -2599,22 +2843,32 @@ class ToitAnalyzerRDC:
             '<border><left style="thin"/><right style="thin"/><top style="thin"/><bottom style="thin"/><diagonal/></border>'
             '</borders>'
             '<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>'
-            '<cellXfs count="3">'
+            '<cellXfs count="4">'
             '<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>'
             '<xf numFmtId="0" fontId="1" fillId="2" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1"/>'
             '<xf numFmtId="3" fontId="0" fillId="0" borderId="1" xfId="0" applyNumberFormat="1" applyBorder="1"/>'
+            '<xf numFmtId="4" fontId="0" fillId="0" borderId="1" xfId="0" applyNumberFormat="1" applyBorder="1"/>'
             '</cellXfs>'
             '<cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>'
             "</styleSheet>"
         )
 
     def _xlsx_sheet(self, rows):
+        max_cols = max((len(row) for row in rows), default=1)
+        last_col = self._xlsx_column_name(max_cols)
         row_xml = []
         for row_index, row in enumerate(rows, start=1):
             cells = []
             for col_index, value in enumerate(row, start=1):
                 cell_ref = "{}{}".format(self._xlsx_column_name(col_index), row_index)
-                style_id = 1 if row_index == 1 else (2 if isinstance(value, (int, float)) else 0)
+                if row_index == 1:
+                    style_id = 1
+                elif isinstance(value, int):
+                    style_id = 2
+                elif isinstance(value, float):
+                    style_id = 3
+                else:
+                    style_id = 0
                 if isinstance(value, (int, float)):
                     cells.append(
                         '<c r="{ref}" s="{style}"><v>{value}</v></c>'.format(
@@ -2629,7 +2883,12 @@ class ToitAnalyzerRDC:
                     )
             row_xml.append('<row r="{}">{}</row>'.format(row_index, "".join(cells)))
 
-        dimension_ref = "A1:D{}".format(max(len(rows), 1))
+        cols = ['<col min="1" max="1" width="32" customWidth="1"/>']
+        if max_cols >= 2:
+            cols.append(
+                '<col min="2" max="{}" width="16" customWidth="1"/>'.format(max_cols)
+            )
+        dimension_ref = "A1:{}{}".format(last_col, max(len(rows), 1))
         return (
             '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
             '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" '
@@ -2640,13 +2899,18 @@ class ToitAnalyzerRDC:
             '<selection pane="bottomLeft" activeCell="A2" sqref="A2"/>'
             '</sheetView></sheetViews>'
             '<sheetFormatPr defaultRowHeight="15"/>'
-            '<cols><col min="1" max="1" width="32" customWidth="1"/>'
-            '<col min="2" max="4" width="16" customWidth="1"/></cols>'
+            '<cols>{}</cols>'
             '<sheetData>{}</sheetData>'
-            '<autoFilter ref="A1:D{}"/>'
+            '<autoFilter ref="A1:{}{}"/>'
             '<pageMargins left="0.7" right="0.7" top="0.75" bottom="0.75" header="0.3" footer="0.3"/>'
             "</worksheet>"
-        ).format(dimension_ref, "".join(row_xml), max(len(rows), 1))
+        ).format(
+            dimension_ref,
+            "".join(cols),
+            "".join(row_xml),
+            last_col,
+            max(len(rows), 1),
+        )
 
     def _xlsx_column_name(self, index):
         name = ""
